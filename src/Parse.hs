@@ -43,7 +43,7 @@ langDef = emptyDef {
 whiteSpace :: P ()
 whiteSpace = Tok.whiteSpace lexer
 
-natural :: P Integer 
+natural :: P Integer
 natural = Tok.natural lexer
 
 stringLiteral :: P String
@@ -86,13 +86,13 @@ tyatom = (reserved "Nat" >> return NatTy)
          <|> parens typeP
 
 typeP :: P Ty
-typeP = try (do 
+typeP = try (do
           x <- tyatom
           reservedOp "->"
           y <- typeP
           return (FunTy x y))
       <|> tyatom
-          
+
 const :: P Const
 const = CNat <$> num
 
@@ -101,7 +101,7 @@ printOp = do
   i <- getPos
   reserved "print"
   str <- option "" stringLiteral
-  a <- atom
+  a <- optionMaybe atom
   return (SPrint i str a)
 
 binary :: String -> BinaryOp -> Assoc -> Operator String () Identity STerm
@@ -161,19 +161,25 @@ fix = do i <- getPos
          t <- expr
          return (SFix i (f,fty) args t)
 
+binders :: P [(Name, Ty)]
+binders = parens binders' <|> binders' where
+  binders' = do
+    f <- var
+    args <- many $ parens binding
+    t <- reservedOp ":" >> typeP
+    return ((f,t):args)
+
 letexp :: P STerm
-letexp = do
+letexp =  do
   i <- getPos
   reserved "let"
   isRec <- (reserved "rec" >> return True) <|> return False
-  f <- var
-  args <- many $ parens binding
-  t <- reserved ":" >> typeP
-  reservedOp "="  
+  bindings <- binders
+  reservedOp "="
   def <- expr
   reserved "in"
   body <- expr
-  return (SLet i isRec ((f,t):args) def body)
+  return (SLet i isRec bindings def body)
 
 -- | Parser de términos
 tm :: P STerm
@@ -181,13 +187,15 @@ tm = app <|> lam <|> ifz <|> printOp <|> fix <|> letexp
 
 -- | Parser de declaraciones
 decl :: P (Decl STerm)
-decl = do 
-     i <- getPos
-     reserved "let"
-     v <- var
-     reservedOp "="
-     t <- expr
-     return (Decl i v t)
+decl = do
+  i <- getPos
+  reserved "let"
+  isRec <- (reserved "rec" >> return True) <|> return False
+  (f, t):args <- binders
+  reservedOp "="
+  def <- expr
+  notFollowedBy (reserved "in")
+  return (Decl i f (SLet i isRec ((f, t):args) def (SV i f))) -- Basicamente las decl crean un let adentro, capaz no era la idea xd
 
 -- | Parser de programas (listas de declaraciones) 
 program :: P [Decl STerm]
